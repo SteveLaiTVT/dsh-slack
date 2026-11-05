@@ -10,6 +10,29 @@ export class FakeTransport {
     this.messageHandlers = []
     this.reactionHandlers = []
     this.postSeq = 0
+    // v0.3 频道上下文假数据与调用计数
+    this.channelInfo = { id: 'C1', name: 'general', topic: '仓库 https://example.com/x/demo.git｜流程：先跑测试再交卷', purpose: '演示频道' }
+    this.channelMessages = [
+      { user: 'U1', text: '这个频道派活给 dsh', ts: '90.001', isBot: false },
+      { user: 'U2', text: '注意先 pull 再干', ts: '90.002', isBot: false },
+    ]
+    this.memberChannels = ['C1']
+    this.infoCalls = 0
+    this.messageCalls = 0
+  }
+
+  async fetchChannelInfo() {
+    this.infoCalls++
+    return this.channelInfo
+  }
+
+  async fetchChannelMessages() {
+    this.messageCalls++
+    return this.channelMessages
+  }
+
+  async listMemberChannels() {
+    return this.memberChannels
   }
 
   onMessage(h) {
@@ -119,30 +142,7 @@ export class FakeCtx {
 }
 
 export const TEST_CONFIG = {
-  channelId: 'C1',
-  allowedUserIds: ['U1'],
-  repoRoots: { demo: 'D:/repos/demo' },
-}
-
-export const TEST_MAPPED_CONFIG = {
-  allowedUserIds: ['U1'],
-  channelRepos: {
-    C1: { repo: 'demo', root: 'D:/repos/demo', remote: 'https://example.com/x/demo.git' },
-    C2: { repo: 'vault', root: 'D:/repos/vault', remote: 'https://example.com/x/vault.git' },
-  },
-}
-
-/** 假仓库同步：记录每次 ensure 的映射，默认报已存在；可传 impl 自定义行为。 */
-export class FakeRepoManager {
-  constructor(impl) {
-    this.calls = []
-    this.impl = impl ?? (async () => ({ action: 'exists' }))
-  }
-
-  async ensure(mapping) {
-    this.calls.push(mapping)
-    return this.impl(mapping)
-  }
+  workdir: 'D:/dsh-work',
 }
 
 export function dispatchEvent(overrides = {}) {
@@ -150,7 +150,7 @@ export function dispatchEvent(overrides = {}) {
     kind: 'message',
     channel: 'C1',
     user: 'U1',
-    text: '[派单] 仓库：demo Issue：https://cnb.cool/x/demo/issues/1 把登录页按钮文案改掉',
+    text: '[派单] Issue：https://cnb.cool/x/demo/issues/1 把登录页按钮文案改掉',
     ts: '100.001',
     threadTs: undefined,
     isBot: false,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSlackPlugin } from '../lib/plugin.js'
-import { dispatchEvent, FakeCtx, FakeRepoManager, FakeTransport, FULL_REPORT, TEST_CONFIG } from './helpers.js'
+import { dispatchEvent, FakeCtx, FakeTransport, FULL_REPORT, TEST_CONFIG } from './helpers.js'
 
 async function setup(history = []) {
   const transport = new FakeTransport()
@@ -9,7 +9,6 @@ async function setup(history = []) {
   const ctx = new FakeCtx()
   const plugin = createSlackPlugin({
     transport,
-    repoManager: new FakeRepoManager(),
     tokens: { appToken: 'xapp-test', botToken: 'xoxb-test' },
     logger: { log: () => {} },
   })
@@ -17,38 +16,62 @@ async function setup(history = []) {
   return { transport, ctx }
 }
 
-test('AC-02 接单：白名单用户派单 -> 打勾、开工帖、按仓根建 session、prompt 带 issue', async () => {
+test('AC-02/14 接单：任意成员派单 -> 打勾、开工帖、session cwd=workdir、prompt 带 issue 与频道上下文', async () => {
   const { transport, ctx } = await setup()
-  await transport.emitMessage(dispatchEvent())
+  await transport.emitMessage(dispatchEvent({ user: 'U9' }))
   assert.ok(transport.reactionsAdded.some(r => r.timestamp === '100.001' && r.name === 'white_check_mark'))
   const posts = transport.postsInThread('100.001')
   assert.ok(posts.some(p => /已开工/.test(p.text)))
   assert.equal(ctx.createdAgents.length, 1)
-  assert.equal(ctx.createdAgents[0].cwd, 'D:/repos/demo')
-  assert.match(ctx.createdAgents[0].agent.followups[0], /issues\/1/)
+  assert.equal(ctx.createdAgents[0].cwd, 'D:/dsh-work')
+  const prompt = ctx.createdAgents[0].agent.followups[0]
+  assert.match(prompt, /issues\/1/)
+  assert.match(prompt, /频道上下文/)
+  assert.match(prompt, /example\.com\/x\/demo\.git/)
 })
 
-test('AC-02 反面：非白名单用户与普通消息无反应', async () => {
+test('AC-14 任意频道：未配置过的频道、另一个成员同样接单（排队）', async () => {
   const { transport, ctx } = await setup()
-  await transport.emitMessage(dispatchEvent({ user: 'U9' }))
+  await transport.emitMessage(dispatchEvent())
+  await transport.emitMessage(dispatchEvent({ channel: 'C9', user: 'U7', ts: '100.002', text: '[派单] 另一个频道的活' }))
+  assert.ok(transport.postsInThread('100.002').some(p => /排队第 1 位/.test(p.text)))
+  assert.equal(ctx.createdAgents.length, 1)
+})
+
+test('AC-15 频道上下文缓存：同频道第二单不重读消息；主题变化后重读', async () => {
+  const { transport, ctx } = await setup()
+  await transport.emitMessage(dispatchEvent())
+  assert.equal(transport.messageCalls, 1)
+  const s1 = 'slack-100001'
+  await ctx.emitSessionEvent(s1, { type: 'assistant/message', data: { text: FULL_REPORT } })
+  await ctx.emitSessionEvent(s1, { type: 'turn/end', data: {} })
+  await new Promise(r => setTimeout(r, 0))
+  await transport.emitMessage(dispatchEvent({ ts: '100.002', text: '[派单] 第二个活' }))
+  assert.equal(transport.messageCalls, 1)
+  // 主题变了 -> 下一单重读
+  transport.channelInfo = { ...transport.channelInfo, topic: '新主题：换仓了' }
+  const s2 = 'slack-100002'
+  await ctx.emitSessionEvent(s2, { type: 'assistant/message', data: { text: FULL_REPORT } })
+  await ctx.emitSessionEvent(s2, { type: 'turn/end', data: {} })
+  await new Promise(r => setTimeout(r, 0))
+  await transport.emitMessage(dispatchEvent({ ts: '100.003', text: '[派单] 第三个活' }))
+  assert.equal(transport.messageCalls, 2)
+  assert.match(ctx.createdAgents[2].agent.followups[0], /新主题/)
+})
+
+test('反面：bot 消息、普通聊天消息无反应', async () => {
+  const { transport, ctx } = await setup()
+  await transport.emitMessage(dispatchEvent({ isBot: true }))
   await transport.emitMessage(dispatchEvent({ ts: '100.002', text: '今天吃什么' }))
   assert.equal(ctx.createdAgents.length, 0)
   assert.equal(transport.posts.length, 0)
   assert.equal(transport.reactionsAdded.length, 0)
 })
 
-test('拒单：未知仓库回帖说明并打 x', async () => {
-  const { transport, ctx } = await setup()
-  await transport.emitMessage(dispatchEvent({ text: '[派单] 仓库：nope 干点活' }))
-  assert.equal(ctx.createdAgents.length, 0)
-  assert.ok(transport.postsInThread('100.001').some(p => /拒单/.test(p.text)))
-  assert.ok(transport.reactionsAdded.some(r => r.name === 'x'))
-})
-
 test('AC-04/07 交卷与排队：两单串行，第一单交卷后第二单自动开工；缺字段标不完整', async () => {
   const { transport, ctx } = await setup()
   await transport.emitMessage(dispatchEvent())
-  await transport.emitMessage(dispatchEvent({ ts: '100.002', text: '[派单] 仓库：demo 第二个活' }))
+  await transport.emitMessage(dispatchEvent({ ts: '100.002', text: '[派单] 第二个活' }))
   assert.equal(ctx.createdAgents.length, 1)
   assert.ok(transport.postsInThread('100.002').some(p => /排队第 1 位/.test(p.text)))
 
@@ -66,7 +89,7 @@ test('AC-04/07 交卷与排队：两单串行，第一单交卷后第二单自�
   assert.ok(transport.postsInThread('100.002').some(p => /交卷不完整/.test(p.text)))
 })
 
-test('AC-03 追问进同一 session；AC-09 [取消] 中止并推进队列外状态', async () => {
+test('AC-03 追问进同一 session；AC-09 [取消] 中止', async () => {
   const { transport, ctx } = await setup()
   await transport.emitMessage(dispatchEvent())
   const agent = ctx.createdAgents[0].agent
@@ -79,7 +102,7 @@ test('AC-03 追问进同一 session；AC-09 [取消] 中止并推进队列外状
   assert.ok(transport.postsInThread('100.001').some(p => /已取消/.test(p.text)))
 })
 
-test('AC-05 审批往返：git push 先问，准 -> 放行；再问，驳 -> deny', async () => {
+test('AC-05 审批往返：git push 先问，准 -> 放行；再问，驳 -> deny（作答者不限成员）', async () => {
   const { transport, ctx } = await setup()
   await transport.emitMessage(dispatchEvent())
   const exec = {
@@ -90,7 +113,7 @@ test('AC-05 审批往返：git push 先问，准 -> 放行；再问，驳 -> den
   const first = ctx.runPreExecute(exec)
   await new Promise(r => setTimeout(r, 10))
   assert.ok(transport.postsInThread('100.001').some(p => /审批请求/.test(p.text)))
-  await transport.emitMessage(dispatchEvent({ ts: '100.020', threadTs: '100.001', text: '准' }))
+  await transport.emitMessage(dispatchEvent({ ts: '100.020', threadTs: '100.001', user: 'U8', text: '准' }))
   assert.equal((await first).kind, 'next')
 
   const second = ctx.runPreExecute(exec)
@@ -117,11 +140,11 @@ test('AC-06 硬拒绝直接 deny 且不惊动审批；外来 session 不归插�
   assert.equal(other.kind, 'next')
 })
 
-test('AC-08 补扫：离线期间的派单在启动后被接单，已打勾的跳过', async () => {
+test('AC-08 补扫：遍历 bot 已加入频道，离线期间的派单被接单，已打勾的跳过', async () => {
   const transport = new FakeTransport()
   transport.historyData = [
-    { user: 'U1', text: '[派单] 仓库：demo 已经处理过的', ts: '99.002' },
-    { user: 'U1', text: '[派单] 仓库：demo 离线时发的活', ts: '99.001' },
+    { user: 'U1', text: '[派单] 已经处理过的', ts: '99.002' },
+    { user: 'U3', text: '[派单] 离线时发的活', ts: '99.001' },
   ]
   transport.reactionUsers.set('99.002:white_check_mark', ['UBOT'])
   const ctx = new FakeCtx()

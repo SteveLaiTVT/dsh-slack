@@ -37,11 +37,15 @@ test('AC-04 validateReport：齐全通过、缺字段与坏 commit 被抓', () =
   assert.equal(none.ok, false)
 })
 
-test('buildDispatchPrompt：带交卷合同与纪律', () => {
-  const p = buildDispatchPrompt({ repo: 'demo', issueUrl: 'https://x/issues/1', body: '改文案' })
+test('buildDispatchPrompt：带频道上下文、定仓指引、交卷合同与纪律', () => {
+  const p = buildDispatchPrompt({ issueUrl: 'https://x/issues/1', body: '改文案', workdir: 'D:/dsh-work' }, '【频道上下文】主题：仓库 X')
+  assert.match(p, /频道上下文/)
+  assert.match(p, /git clone/)
   assert.match(p, /## 交卷/)
   assert.match(p, /未 push 到远程分支不算完成/)
   assert.match(p, /改文案/)
+  const bare = buildDispatchPrompt({ issueUrl: undefined, body: 'x', workdir: 'D:/dsh-work' })
+  assert.doesNotMatch(bare, /频道上下文（插件/)
 })
 
 test('AC-10 redact：抹 token 模式与登记秘密，truncate 保留头尾', () => {
@@ -55,12 +59,17 @@ test('AC-10 redact：抹 token 模式与登记秘密，truncate 保留头尾', (
   assert.match(long, /省略/)
 })
 
-test('config：必填校验、默认值、token 从 env 读', () => {
-  assert.throws(() => validateConfig({}), /缺少必填配置/)
-  assert.throws(() => validateConfig({ channelId: 'C', allowedUserIds: ['U'], repoRoots: { a: 'relative/path' } }), /不是绝对路径/)
-  const c = validateConfig({ channelId: 'C', allowedUserIds: ['U'], repoRoots: { a: 'D:/repos/a' } })
+test('config v0.3：零配置可启动、workdir 校验、旧字段忽略、token 从 env 读', () => {
+  const bare = validateConfig({})
+  assert.ok(bare.workdir.length > 0)
+  assert.deepEqual(bare.roots, [bare.workdir])
+  assert.throws(() => validateConfig({ workdir: 'relative/path' }), /不是绝对路径/)
+  // v0.1/v0.2 旧字段出现不报错、被忽略
+  const c = validateConfig({ workdir: 'D:/dsh-work', channelId: 'C', allowedUserIds: ['U'], repoRoots: { a: 'D:/repos/a' }, channelRepos: { C: { repo: 'a', root: 'D:/repos/a' } } })
+  assert.equal(c.workdir, 'D:/dsh-work')
   assert.equal(c.approvalTimeoutMinutes, 30)
   assert.equal(c.queueLimit, 5)
+  assert.equal(c.contextMessages, 20)
   const tokens = readTokens(c, { DSH_SLACK_APP_TOKEN: 'xapp-1', DSH_SLACK_BOT_TOKEN: 'xoxb-1' })
   assert.equal(tokens.appToken, 'xapp-1')
   assert.throws(() => readTokens(c, {}), /未设置/)
