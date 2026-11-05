@@ -133,12 +133,6 @@ export class FakeCtx {
       h({ id: sessionId }, event)
     }
   }
-
-  async runPreExecute(exec) {
-    const handler = (this.handlers.get('tools/pre-execute') ?? [])[0]
-    if (!handler) throw new Error('插件未注册 tools/pre-execute')
-    return handler(exec, async () => ({ kind: 'next' }))
-  }
 }
 
 export const TEST_CONFIG = {

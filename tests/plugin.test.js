@@ -102,7 +102,7 @@ test('AC-03 追问进同一 session；AC-09 [取消] 中止', async () => {
   assert.ok(transport.postsInThread('100.001').some(p => /已取消/.test(p.text)))
 })
 
-test('v0.4 无权限网关：不注册 tools/pre-execute，thread 里发「准」按普通追问进 session', async () => {
+test('v0.4 不拦截工具执行：不注册 tools/pre-execute，thread 里发「准」按普通追问进 session', async () => {
   const { transport, ctx } = await setup()
   assert.equal(ctx.handlers.has('tools/pre-execute'), false)
   await transport.emitMessage(dispatchEvent())
