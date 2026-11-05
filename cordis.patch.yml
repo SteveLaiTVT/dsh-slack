@@ -1,0 +1,12 @@
+# dsh-slack bundle layer: 本包作为 profile bundle 挂载时自动应用。
+# inject 必须写在这一行上（loader 只认补丁行的 inject，不认模块自身的导出）；
+# 模块内的 `export const inject` 只对直接 ctx.plugin() 挂载（测试）生效，两边都要有。
+# profile 自己的 cordis.patch.yml 可按 row id 覆盖 config（整段替换，需重述全部字段）。
+
+- insert:
+    - id: dsh-slack
+      name: dsh-slack
+      inject:
+        - agents
+        - sessions
+        - sessionPersistence

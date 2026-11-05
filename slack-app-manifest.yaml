@@ -1,0 +1,34 @@
+# Slack 应用 manifest —— 在 api.slack.com/apps 新建应用时选「From a manifest」粘贴本文件
+# 应用名 dsh-runner（可改）；建好后到「Socket Mode」页生成 App-Level Token，
+# 到「Install App」页拿 Bot Token；两个 token 只存公司机 dsh 的凭据区，不进任何仓库/聊天。
+display_information:
+  name: dsh-runner
+  description: DeepSeek Harness 的 Slack 接单员：在派单频道接单、在本机执行、thread 交卷。
+features:
+  bot_user:
+    display_name: dsh
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
+      - chat:write
+      - reactions:write
+      - reactions:read
+      - users:read
+settings:
+  socket_mode_enabled: true
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - reaction_added
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  token_rotation_enabled: false
