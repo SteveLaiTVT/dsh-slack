@@ -102,42 +102,15 @@ test('AC-03 追问进同一 session；AC-09 [取消] 中止', async () => {
   assert.ok(transport.postsInThread('100.001').some(p => /已取消/.test(p.text)))
 })
 
-test('AC-05 审批往返：git push 先问，准 -> 放行；再问，驳 -> deny（作答者不限成员）', async () => {
+test('v0.4 无权限网关：不注册 tools/pre-execute，thread 里发「准」按普通追问进 session', async () => {
   const { transport, ctx } = await setup()
+  assert.equal(ctx.handlers.has('tools/pre-execute'), false)
   await transport.emitMessage(dispatchEvent())
-  const exec = {
-    tool: { name: 'bash' },
-    args: { command: 'git push origin feat/x' },
-    sessionId: 'slack-100001',
-  }
-  const first = ctx.runPreExecute(exec)
-  await new Promise(r => setTimeout(r, 10))
-  assert.ok(transport.postsInThread('100.001').some(p => /审批请求/.test(p.text)))
-  await transport.emitMessage(dispatchEvent({ ts: '100.020', threadTs: '100.001', user: 'U8', text: '准' }))
-  assert.equal((await first).kind, 'next')
-
-  const second = ctx.runPreExecute(exec)
-  await new Promise(r => setTimeout(r, 10))
-  await transport.emitMessage(dispatchEvent({ ts: '100.021', threadTs: '100.001', text: '驳' }))
-  assert.equal((await second).kind, 'deny')
-})
-
-test('AC-06 硬拒绝直接 deny 且不惊动审批；外来 session 不归插件管', async () => {
-  const { transport, ctx } = await setup()
-  await transport.emitMessage(dispatchEvent())
-  const deny = await ctx.runPreExecute({
-    tool: { name: 'read' },
-    args: { path: 'C:/Users/x/.ssh/id_rsa' },
-    sessionId: 'slack-100001',
-  })
-  assert.equal(deny.kind, 'deny')
-  assert.ok(transport.postsInThread('100.001').some(p => /硬拒绝/.test(p.text)))
-  const other = await ctx.runPreExecute({
-    tool: { name: 'bash' },
-    args: { command: 'git push origin x' },
-    sessionId: 'someone-elses-session',
-  })
-  assert.equal(other.kind, 'next')
+  const agent = ctx.createdAgents[0].agent
+  await transport.emitMessage(dispatchEvent({ ts: '100.020', threadTs: '100.001', text: '准' }))
+  assert.equal(agent.followups.length, 2)
+  assert.match(agent.followups[1], /准/)
+  assert.equal(transport.postsInThread('100.001').some(p => /审批请求/.test(p.text)), false)
 })
 
 test('AC-08 补扫：遍历 bot 已加入频道，离线期间的派单被接单，已打勾的跳过', async () => {

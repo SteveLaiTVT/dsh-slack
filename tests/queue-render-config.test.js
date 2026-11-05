@@ -62,12 +62,11 @@ test('AC-10 redact：抹 token 模式与登记秘密，truncate 保留头尾', (
 test('config v0.3：零配置可启动、workdir 校验、旧字段忽略、token 从 env 读', () => {
   const bare = validateConfig({})
   assert.ok(bare.workdir.length > 0)
-  assert.deepEqual(bare.roots, [bare.workdir])
+  assert.equal(bare.queueLimit, 5)
   assert.throws(() => validateConfig({ workdir: 'relative/path' }), /不是绝对路径/)
   // v0.1/v0.2 旧字段出现不报错、被忽略
   const c = validateConfig({ workdir: 'D:/dsh-work', channelId: 'C', allowedUserIds: ['U'], repoRoots: { a: 'D:/repos/a' }, channelRepos: { C: { repo: 'a', root: 'D:/repos/a' } } })
   assert.equal(c.workdir, 'D:/dsh-work')
-  assert.equal(c.approvalTimeoutMinutes, 30)
   assert.equal(c.queueLimit, 5)
   assert.equal(c.contextMessages, 20)
   const tokens = readTokens(c, { DSH_SLACK_APP_TOKEN: 'xapp-1', DSH_SLACK_BOT_TOKEN: 'xoxb-1' })

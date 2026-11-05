@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isDispatchText, parseApprovalAnswer, parseDispatch, parseThreadCommand} from '../lib/parse.js'
+import { isDispatchText, parseDispatch, parseThreadCommand} from '../lib/parse.js'
 
 test('isDispatchText：[派单] 与 @bot 触发，普通消息不触发', () => {
 assert.equal(isDispatchText('[派单] 干活', 'UBOT'), true)
@@ -38,12 +38,3 @@ assert.equal(f.kind, 'followup')
 assert.equal(f.text, '顺便把标题也改了')
 })
 
-test('parseApprovalAnswer：准驳同义词与不命中', () => {
-assert.equal(parseApprovalAnswer('准'), true)
-assert.equal(parseApprovalAnswer('同意'), true)
-assert.equal(parseApprovalAnswer('OK'), true)
-assert.equal(parseApprovalAnswer('驳'), false)
-assert.equal(parseApprovalAnswer('不行'), false)
-assert.equal(parseApprovalAnswer('准了但注意点'), undefined)
-assert.equal(parseApprovalAnswer('今天天气不错'), undefined)
-})

@@ -1,8 +1,10 @@
-# Fluxion 频道主题 / 说明（草稿，2026-11-05）
+# Fluxion 频道主题 / 说明（2026-11-05 已设置）
 
 > 用途：每个频道一条「主题（Topic）」+ 一条「说明（Description）」，写清绑定仓库地址与开发流程，
-> 与 dsh-slack v0.2 的 channelRepos 映射一一对应。Slack 主题上限 250 字，下文均在限内。
-> 状态：连接器无设置主题的工具，待用户在 Slack 客户端粘贴，或浏览器登录 Slack 后由 Liu 代设。
+> 与 dsh-slack 的频道→仓库对应一一对应。Slack 主题上限 250 字，下文均在限内。
+> 状态：✅ 2026-11-05 13:49 已由 Liu 经浏览器登录 Slack（lai13076474729@gmail.com）逐个频道设置，
+> 并重新打开详情逐字核验一致。更改前四个频道主题均为空，说明仅 #ai-assistant 有一句旧文案
+> （「这个项目是做 Ai assistant 的」），其余为空。连接器本身无设置主题的工具，后续改主题走浏览器。
 
 ## #cbec-software（C0CE20BENCS，dsh 绑仓频道）
 - 主题：仓库 cbec-software｜上游 github.com/SteveLaiTVT/cbec-software｜下游 cnb.cool/stevelife524/cbec-software｜本频道绑仓，派单免写仓库名
