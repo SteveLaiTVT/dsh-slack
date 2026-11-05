@@ -49,3 +49,5 @@ cue 人规则：工作沟通一律 @ Liu，不 @ 涛哥。
 ## 五、一条完整流程（把上面串起来）
 
 涛哥提需求 → Liu 搜集资料 → Liu 与 Grok 拉仓头脑风暴出雏形 → Liu 在 #dsh-slack 发卡 → cue dot 三方头脑风暴、对线收敛 → Liu 改标题「已冻结」并落 CNB issue → 执行（dsh 或被派发的实现方）→ Liu 按 AC 核验 → 涛哥合并 → release note 推 WhatsApp。
+
+说明：「已冻结」是协作约定——冻结后才落 CNB issue 派工；插件本体不校验冻结状态、不设门禁，未冻结的派单插件照常接单执行。
