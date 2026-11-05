@@ -3,17 +3,34 @@ import test from 'node:test'
 import { createSlackPlugin } from '../lib/plugin.js'
 import { dispatchEvent, FakeCtx, FakeTransport, FULL_REPORT, TEST_CONFIG } from './helpers.js'
 
-async function setup(history = []) {
+async function setup(history = [], extraDeps = {}) {
   const transport = new FakeTransport()
   transport.historyData = history
   const ctx = new FakeCtx()
   const plugin = createSlackPlugin({
-    transport,
     tokens: { appToken: 'xapp-test', botToken: 'xoxb-test' },
     logger: { log: () => {} },
+    ...extraDeps,
+    transport,
   })
   await plugin.apply(ctx, TEST_CONFIG)
   return { transport, ctx }
+}
+
+/** 截住 bridge.start 的 task 与 prompt，用来断言落盘记录和交给宿主的正文。 */
+function captureBridge() {
+  const started = []
+  const bridge = {
+    async start(task, promptText) {
+      started.push({ task, promptText })
+    },
+    async followup() { return true },
+    cancel() { return false },
+    forget() {},
+    isCancelled() { return false },
+    handleSessionEvent() {},
+  }
+  return { started, bridge }
 }
 
 test('AC-02/14 接单：任意成员派单 -> 打勾、开工帖、session cwd=workdir、prompt 带 issue 与频道上下文', async () => {
@@ -111,6 +128,46 @@ test('v0.4 无权限网关：不注册 tools/pre-execute，thread 里发「准�
   assert.equal(agent.followups.length, 2)
   assert.match(agent.followups[1], /准/)
   assert.equal(transport.postsInThread('100.001').some(p => /审批请求/.test(p.text)), false)
+})
+
+test('仓库透传：派单写「仓库：X」、频道上下文为 Y 时，prompt 与 task 记录均为 X', async () => {
+  const transport = new FakeTransport()
+  transport.channelInfo = {
+    id: 'C1',
+    name: 'general',
+    topic: '仓库：Y｜流程：先跑测试再交卷',
+    purpose: 'Y 仓频道',
+  }
+  const ctx = new FakeCtx()
+  const { started, bridge } = captureBridge()
+  const plugin = createSlackPlugin({
+    transport,
+    bridge,
+    tokens: { appToken: 'xapp-test', botToken: 'xoxb-test' },
+    logger: { log: () => {} },
+  })
+  await plugin.apply(ctx, TEST_CONFIG)
+  await transport.emitMessage(dispatchEvent({
+    text: '[派单] 仓库：X Issue：https://cnb.cool/x/demo/issues/1 把登录页按钮文案改掉',
+  }))
+  assert.equal(started.length, 1)
+  assert.equal(started[0].task.repo, 'X')
+  assert.match(started[0].promptText, /指定仓库：X（派单指定，优先于频道上下文推断）/)
+  assert.match(started[0].promptText, /本单仓库以派单指定的「X」为准，优先于频道上下文里推断出的仓库/)
+  assert.match(started[0].promptText, /主题：仓库：Y/)
+  assert.doesNotMatch(started[0].promptText, /指定仓库：Y/)
+})
+
+test('仓库透传：派单不写仓库时不造 repo，prompt 无指定仓库行，仍按频道上下文推断', async () => {
+  const { started, bridge } = captureBridge()
+  const { transport } = await setup([], { bridge })
+  await transport.emitMessage(dispatchEvent({ text: '[派单] 帮我把文档错别字修了' }))
+  assert.equal(started.length, 1)
+  assert.equal(Object.hasOwn(started[0].task, 'repo'), false)
+  assert.doesNotMatch(started[0].promptText, /指定仓库：/)
+  assert.match(started[0].promptText, /先读上面的频道上下文/)
+  assert.match(started[0].promptText, /git clone 上下文给出的仓库地址/)
+  assert.match(started[0].promptText, /example\.com\/x\/demo\.git/)
 })
 
 test('AC-08 补扫：遍历 bot 已加入频道，离线期间的派单被接单，已打勾的跳过', async () => {
