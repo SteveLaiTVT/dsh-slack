@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import http from 'node:http'
 import test from 'node:test'
 import { createSlackPlugin } from '../lib/plugin.js'
 import { createRedactor } from '../lib/redact.js'
@@ -315,10 +316,23 @@ test('AC-22 validateReport：多行、空值、歧义、commit/PR 反例', () =>
   assert.equal(kept.ok, true)
   assert.equal(kept.ambiguous, false)
   assert.equal(kept.fields.repo, 'demo')
-  assert.equal(kept.fields.ac, 'AC-1 达成；AC-2 达成')
+  assert.equal(kept.fields.branch, 'feat/button-copy')
+  assert.equal(kept.fields.tests, 'npm test，12 通过 0 失败')
   assert.equal(kept.fields.pr, 'https://cnb.cool/x/demo/pulls/7')
-  assert.equal(kept.block.includes('fenced-should-not-count'), false)
-  assert.equal(kept.block.includes('围栏里的原因'), false)
+  // 围栏内的假字段头不另立字段，但正文是当前 AC 字段的续行。
+  assert.equal(kept.fields.ac, [
+    'AC-1 达成；AC-2 达成',
+    '## 交卷',
+    '- 仓库：fenced-should-not-count',
+    '- 分支：nope',
+    `- Commit：${'a'.repeat(40)}`,
+    '- PR：无：围栏里的原因',
+    '- 测试：不应被解析',
+    '- AC 对照：不应被解析',
+  ].join('\n'))
+  assert.equal(kept.block.includes('fenced-should-not-count'), true)
+  assert.equal(kept.block.includes('围栏里的原因'), true)
+  assert.equal(kept.block.includes('```'), false)
 
   for (const heading of ['## 后续说明', '# 总览']) {
     const sectioned = [
@@ -352,6 +366,174 @@ test('AC-22 validateReport：多行、空值、歧义、commit/PR 反例', () =>
   }))
   assert.equal(lowerHeading.ok, true)
   assert.equal(lowerHeading.fields.ac, 'AC-1 达成\n### 失败细节\n按钮颜色不对')
+})
+
+test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全，fenced 日志保留 FAIL', () => {
+  const tildeFake = [
+    '还没交卷，下面只是格式示例：',
+    '~~~',
+    '## 交卷',
+    '- 仓库：demo',
+    '- 分支：feat/x',
+    `- Commit：${HASH}`,
+    '- PR：https://example.com/pr/1',
+    '- 测试：npm test，12 通过 0 失败',
+    '- AC 对照：AC-1 达成',
+    '~~~',
+  ].join('\n')
+  const fenced = validateReport(tildeFake)
+  assert.equal(fenced.ok, false)
+  assert.equal(fenced.ambiguous, false)
+  assert.equal(fenced.fields.repo, undefined)
+  assert.equal(fenced.prKind, undefined)
+  assert.deepEqual(fenced.missing, ['repo', 'branch', 'commit', 'pr', 'tests', 'ac'])
+  const fencedCard = cardOf(tildeFake)
+  assert.equal(fencedCard.blocks[0].text.text, '交卷不完整')
+  assert.equal(sectionBody(fencedCard, '仓库'), '—')
+
+  const indented = [
+    '   ~~~',
+    '   ## 交卷',
+    '   - 仓库：demo',
+    '   - 分支：feat/x',
+    `   - Commit：${HASH}`,
+    '   - PR：https://example.com/pr/1',
+    '   - 测试：npm test',
+    '   - AC 对照：AC-1 达成',
+    '   ~~~',
+  ].join('\n')
+  const indentedReport = validateReport(indented)
+  assert.equal(indentedReport.ok, false)
+  assert.deepEqual(indentedReport.missing, ['repo', 'branch', 'commit', 'pr', 'tests', 'ac'])
+
+  const onlyInside = [
+    '## 交卷',
+    '- 仓库：',
+    '~~~',
+    'demo',
+    '~~~',
+    '- 分支：',
+    '```md',
+    'feat/x',
+    '```',
+    '- Commit：',
+    '~~~',
+    HASH,
+    '~~~',
+    '- PR：',
+    '```',
+    'https://example.com/pr/1',
+    '````',
+    '- 测试：',
+    '~~~',
+    'npm test，1 通过',
+    '~~~',
+    '- AC 对照：',
+    '~~~',
+    'AC-1 达成',
+    '~~~',
+  ].join('\n')
+  const insideReport = validateReport(onlyInside)
+  assert.equal(insideReport.ok, true)
+  assert.equal(insideReport.fields.repo, 'demo')
+  assert.equal(insideReport.fields.branch, 'feat/x')
+  assert.equal(insideReport.fields.commit, HASH)
+  assert.equal(insideReport.fields.pr, 'https://example.com/pr/1')
+  assert.equal(insideReport.prKind, 'url')
+  assert.equal(insideReport.fields.tests, 'npm test，1 通过')
+  assert.equal(insideReport.fields.ac, 'AC-1 达成')
+  assert.equal(insideReport.block.includes('```'), false)
+  assert.equal(insideReport.block.includes('~~~'), false)
+
+  const fencedLog = [
+    '## 交卷',
+    '- 仓库：demo',
+    '- 分支：feat/x',
+    `- Commit：${HASH}`,
+    '- PR：https://example.com/pr/1',
+    '- 测试：npm test',
+    '```',
+    'node --test',
+    '## 日志',
+    'FAIL AC-2',
+    '  AssertionError: expected button color',
+    '```',
+    '- AC 对照：AC-1 达成',
+  ].join('\n')
+  const expectedTests = [
+    'npm test',
+    'node --test',
+    '## 日志',
+    'FAIL AC-2',
+    '  AssertionError: expected button color',
+  ].join('\n')
+  const logReport = validateReport(fencedLog)
+  assert.equal(logReport.ok, true)
+  assert.equal(logReport.fields.tests, expectedTests)
+  assert.equal(logReport.fields.ac, 'AC-1 达成')
+  assert.equal(logReport.fields.repo, 'demo')
+  const logCard = cardOf(fencedLog)
+  assert.equal(logCard.blocks[0].text.text, '交卷（字段齐全）')
+  assert.equal(sectionBody(logCard, '测试'), expectedTests)
+  assert.equal(sectionBody(logCard, 'AC 对照'), 'AC-1 达成')
+  assert.match(logCard.text, /FAIL AC-2/)
+  assert.match(logCard.text, /AssertionError: expected button color/)
+
+  const shortCloser = [
+    '## 交卷',
+    '- 仓库：demo',
+    '- 分支：feat/x',
+    `- Commit：${HASH}`,
+    '- PR：https://example.com/pr/1',
+    '- 测试：npm test',
+    '````',
+    'FAIL AC-2',
+    '```',
+    'still-in-log',
+    '````',
+    '- AC 对照：AC-1 达成',
+  ].join('\n')
+  const shortReport = validateReport(shortCloser)
+  assert.equal(shortReport.ok, true)
+  assert.equal(shortReport.fields.tests, ['npm test', 'FAIL AC-2', '```', 'still-in-log'].join('\n'))
+  assert.equal(shortReport.fields.ac, 'AC-1 达成')
+
+  const crossChar = [
+    '## 交卷',
+    '- 仓库：demo',
+    '- 分支：feat/x',
+    `- Commit：${HASH}`,
+    '- PR：https://example.com/pr/1',
+    '- 测试：npm test',
+    '~~~',
+    'FAIL AC-9',
+    '```',
+    'after-fake-closer',
+    '~~~',
+    '- AC 对照：AC-1 达成',
+  ].join('\n')
+  const crossReport = validateReport(crossChar)
+  assert.equal(crossReport.ok, true)
+  assert.equal(crossReport.fields.tests, ['npm test', 'FAIL AC-9', '```', 'after-fake-closer'].join('\n'))
+  assert.equal(crossReport.fields.ac, 'AC-1 达成')
+
+  const afterClosed = [
+    '~~~',
+    '## 交卷',
+    '- 仓库：fake',
+    '- 分支：nope',
+    `- Commit：${'b'.repeat(40)}`,
+    '- PR：无：围栏里',
+    '- 测试：不要',
+    '- AC 对照：不要',
+    '~~~',
+    reportText(),
+  ].join('\n')
+  const afterReport = validateReport(afterClosed)
+  assert.equal(afterReport.ok, true)
+  assert.equal(afterReport.ambiguous, false)
+  assert.equal(afterReport.fields.repo, 'demo')
+  assert.equal(afterReport.fields.pr, 'https://cnb.cool/x/demo/pulls/7')
 })
 
 test('AC-23 buildReportCard：脱敏先于转义、链接不截断、超长显式截断、长度终检', () => {
@@ -696,7 +878,7 @@ test('AC-19(e) 构造失败：独立纯文本兜底，不依赖失败构造函�
   }
 })
 
-test('AC-19(f) 真实 transport 构造 WebClient 时 retryConfig.retries 为 0，不发网络请求', async () => {
+test('AC-19(f) 真实 transport 构造 WebClient 时 retries 为 0 且 rejectRateLimitedCalls 为 true，不发网络请求', async () => {
   const constructed = []
   class CapturingWebClient {
     constructor(token, options) {
@@ -718,8 +900,111 @@ test('AC-19(f) 真实 transport 构造 WebClient 时 retryConfig.retries 为 0�
   await transport.connect()
   assert.equal(constructed.length, 1)
   assert.equal(constructed[0].token, TOKENS.botToken)
-  assert.deepEqual(constructed[0].options, { retryConfig: { retries: 0 } })
+  assert.deepEqual(constructed[0].options, {
+    retryConfig: { retries: 0 },
+    rejectRateLimitedCalls: true,
+  })
   assert.equal(transport.botUserId, 'UBOT')
+})
+
+test('AC-19(g) 真实 WebClient：连接断开与 429 都只请求一次且不等待重发', async () => {
+  const { createRequire } = await import('node:module')
+  const { version } = createRequire(import.meta.url)('@slack/web-api/package.json')
+  assert.equal(version, '7.19.0')
+  const { WebClient } = await import('@slack/web-api')
+  const silentLogger = {
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
+    setLevel() {},
+    getLevel() { return 'error' },
+    setName() {},
+  }
+
+  async function runCase(mode) {
+    const requests = []
+    const server = http.createServer((req, res) => {
+      requests.push(req.url)
+      if (mode === 'reset' && req.url.endsWith('/chat.postMessage')) {
+        req.socket.on('error', () => {})
+        req.socket.destroy()
+        return
+      }
+      req.on('data', () => {})
+      req.on('error', () => {})
+      req.on('end', () => {
+        if (req.url.endsWith('/auth.test')) {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: true, user_id: 'UBOT' }))
+          return
+        }
+        if (req.url.endsWith('/chat.postMessage')) {
+          res.writeHead(429, {
+            'content-type': 'application/json',
+            'retry-after': '30',
+          })
+          res.end(JSON.stringify({ ok: false, error: 'ratelimited' }))
+          return
+        }
+        res.writeHead(500)
+        res.end('unexpected')
+      })
+    })
+    server.on('clientError', () => {})
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address()
+    const slackApiUrl = `http://127.0.0.1:${port}/api/`
+    try {
+      class LocalWebClient extends WebClient {
+        constructor(token, options) {
+          super(token, { ...options, slackApiUrl, logger: silentLogger })
+        }
+      }
+      class NoSocket {
+        on() {}
+        async start() {}
+      }
+      const transport = new SlackTransport({
+        ...TOKENS,
+        sdkConstructors: { WebClient: LocalWebClient, SocketModeClient: NoSocket },
+      })
+      await transport.connect()
+      assert.equal(transport.botUserId, 'UBOT', mode)
+      assert.equal(requests.filter(url => url.endsWith('/auth.test')).length, 1, mode)
+      const before = requests.length
+      const started = Date.now()
+      let timeoutId
+      const outcome = await Promise.race([
+        transport.postMessage('C1', 'hello', '100.001').then(
+          value => ({ value }),
+          error => ({ error }),
+        ),
+        new Promise(resolve => {
+          timeoutId = setTimeout(() => resolve({ timedOut: true }), 2000)
+        }),
+      ])
+      clearTimeout(timeoutId)
+      const elapsed = Date.now() - started
+      const chatHits = requests.slice(before).filter(url => url.includes('chat.postMessage'))
+      assert.equal(outcome.timedOut, undefined, `${mode} 等待了重发 elapsed=${elapsed} hits=${chatHits.length} urls=${requests.join(',')}`)
+      assert.ok(outcome.error, mode)
+      assert.equal(chatHits.length, 1, `${mode} urls=${requests.join(',')}`)
+      assert.ok(elapsed < 2000, `${mode} elapsed ${elapsed}`)
+      if (mode === 'reset') {
+        assert.equal(outcome.error.code, 'slack_webapi_request_error', outcome.error.message)
+      } else {
+        assert.equal(outcome.error.code, 'slack_webapi_rate_limited_error', `${outcome.error.name} ${outcome.error.message}`)
+        assert.equal(outcome.error.retryAfter, 30)
+      }
+    } finally {
+      server.closeAllConnections?.()
+      await new Promise(resolve => server.close(resolve))
+    }
+  }
+
+  await runCase('reset')
+  await runCase('429')
 })
 
 test('AC-20 开工/排队/取消/启动失败仍是纯文本，文案不变', async () => {
