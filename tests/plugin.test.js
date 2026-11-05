@@ -113,6 +113,53 @@ test('v0.4 无权限网关：不注册 tools/pre-execute，thread 里发「准�
   assert.equal(transport.postsInThread('100.001').some(p => /审批请求/.test(p.text)), false)
 })
 
+test('🚫 取消：bot 的反应不取消任务、无取消回帖', async () => {
+  const { transport, ctx } = await setup()
+  await transport.emitMessage(dispatchEvent())
+  const agent = ctx.createdAgents[0].agent
+  const postsBefore = transport.postsInThread('100.001').length
+
+  await transport.emitReaction({
+    kind: 'reaction',
+    channel: 'C1',
+    user: 'UBOT2',
+    reaction: 'no_entry_sign',
+    itemTs: '100.001',
+    isBot: true,
+  })
+  // Slack 上本 bot 的 reaction_added 常常只有 user、没有 bot_id。
+  await transport.emitReaction({
+    kind: 'reaction',
+    channel: 'C1',
+    user: transport.botUserId,
+    reaction: 'no_entry_sign',
+    itemTs: '100.001',
+  })
+
+  assert.equal(agent.cancelCalls.length, 0)
+  assert.equal(transport.postsInThread('100.001').length, postsBefore)
+  assert.equal(transport.postsInThread('100.001').some(p => /已取消/.test(p.text)), false)
+  await transport.emitMessage(dispatchEvent({ ts: '100.010', threadTs: '100.001', text: '还在吗' }))
+  assert.equal(agent.followups.length, 2)
+  assert.match(agent.followups[1], /还在吗/)
+})
+
+test('🚫 取消：人类成员（含非发起人）加反应按现状取消', async () => {
+  const { transport, ctx } = await setup()
+  await transport.emitMessage(dispatchEvent()) // 发起人是 U1
+  const agent = ctx.createdAgents[0].agent
+  await transport.emitReaction({
+    kind: 'reaction',
+    channel: 'C1',
+    user: 'U9',
+    reaction: 'no_entry_sign',
+    itemTs: '100.001',
+  })
+  assert.equal(agent.cancelCalls.length, 1)
+  assert.deepEqual(agent.cancelCalls[0], { kind: 'user' })
+  assert.ok(transport.postsInThread('100.001').some(p => /已取消/.test(p.text) && /🚫 表情/.test(p.text)))
+})
+
 test('AC-08 补扫：遍历 bot 已加入频道，离线期间的派单被接单，已打勾的跳过', async () => {
   const transport = new FakeTransport()
   transport.historyData = [
