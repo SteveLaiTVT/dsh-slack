@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSlackPlugin } from '../lib/plugin.js'
-import { dispatchEvent, FakeCtx, FakeTransport, FULL_REPORT, TEST_CONFIG } from './helpers.js'
+import { dispatchEvent, FakeCtx, FakeRepoManager, FakeTransport, FULL_REPORT, TEST_CONFIG } from './helpers.js'
 
 async function setup(history = []) {
   const transport = new FakeTransport()
@@ -9,6 +9,7 @@ async function setup(history = []) {
   const ctx = new FakeCtx()
   const plugin = createSlackPlugin({
     transport,
+    repoManager: new FakeRepoManager(),
     tokens: { appToken: 'xapp-test', botToken: 'xoxb-test' },
     logger: { log: () => {} },
   })

@@ -1,12 +1,12 @@
 # dsh-slack —— DeepSeek Harness 的 Slack 渠道插件
 
-让公司 Windows 上的 DeepSeek Harness（dsh）成为 Fluxion 工作区里的落户型 bot：在指定派单频道被 cue 接单、在本机仓库执行任务、进度与结果回帖 thread、按固定格式交卷。设计与验收标准见同目录 `SPEC.md`；装配步骤见 `SETUP.md`。
+让公司 Windows 上的 DeepSeek Harness（dsh）成为 Fluxion 工作区里的落户型 bot：在派单频道被 cue 接单、在本机仓库执行任务、进度与结果回帖 thread、按固定格式交卷。**v0.2 起支持频道→仓库映射：不同频道绑定不同仓库，按频道自动定仓并在开工前 clone/pull 该仓。**设计与验收标准见同目录 `SPEC.md`；装配步骤见 `SETUP.md`。
 
 ## 工作方式
 
 - **连接**：Slack Socket Mode 出站长连接（不需要公网回调/内网穿透）。
-- **接单**：只认配置频道内、配置发送者（工作区 owner 本人）的消息：`@dsh` 或以 `[派单]` 开头。正文格式：
-  `[派单] 仓库：<标识> Issue：<链接> 任务描述…`（仓库标识必须在配置的 `repoRoots` 里，否则当场拒单并说明）
+- **接单**：只认配置频道内、配置发送者（工作区 owner 本人）的消息：`@dsh` 或以 `[派单]` 开头。
+- **频道→仓库映射**：一个频道绑定一个仓库（配置 `channelRepos`）。在绑仓频道里派单不用写仓库，格式简化为 `[派单] Issue：<链接> 任务描述…`，插件按频道定仓、定工作目录，并在开工前同步该仓：本地没有就按映射的 `remote` clone，已有就 `pull --ff-only`；同步失败不开工并回帖说明。派单里写了与频道绑定不一致的仓库会直接拒单（防串仓）；未映射的频道无任何反应。旧式单频道 + 正文写「仓库：<标识>」仍然兼容。
 - **执行**：一个派单 = 一个 thread = 一个 dsh session；单任务串行，多的排队（上限可配）；thread 内发言即追问，`[取消]` 中止，发「状态」查进度。
 - **交卷**：dsh 最后一条回复必须带 `## 交卷` 块（仓库/分支/Commit/PR/测试/AC 对照）；插件校验字段，缺项会回帖标注「交卷不完整」。
 - **审批**：工具层三档策略——白名单内常规操作自动放行；git push、删除、装依赖、白名单外路径等在 thread 里转人工（回「准」/「驳」或给询问消息加 ✅/🚫，超时按驳回）；凭据类路径（`.ssh`、`.env`、`.pem` 等）硬拒绝。
@@ -20,13 +20,23 @@
 ```yaml
 - name: 'dsh-slack'
   config:
-    channelId: 'C0XXXXXXXXX'          # 派单频道 ID
     allowedUserIds: ['U0ARCEG2T4K']   # 只认这些发送者
-    repoRoots:
-      demo: 'D:\repos\demo'           # repo 标识 -> 本机绝对路径（白名单根）
+    channelRepos:                     # 频道 -> 仓库映射（推荐写法）
+      'C0CDLNUCV0F':                  # #ai-assistant
+        repo: 'ble-sim'
+        root: 'D:\repos\ble-sim'      # 本机路径（白名单根）
+        remote: 'https://cnb.cool/stevelife524/ai-assistant/ble-sim.git'  # 缺失时 clone、开工前 pull
+        # branch: 'main'              # 可选
+      'C0CE20BENCS':                  # #cbec-software
+        repo: 'cbec-software'
+        root: 'D:\repos\cbec-software'
+        remote: 'https://cnb.cool/stevelife524/cbec-software.git'
     # 可选：approvalTimeoutMinutes: 30, queueLimit: 5, rescanHours: 24
     # 可选：agentOptions: {}          # 透传给宿主 agents.create，一般留空走 dsh 默认模型
+    # 旧式兼容：channelId: 'C…' + repoRoots: { demo: 'D:\repos\demo' }，仓库由派单正文「仓库：」指定
 ```
+
+Fluxion 现有频道 ID：`#ai-assistant` = `C0CDLNUCV0F`、`#ai-dev` = `C0ASM22EZ0Q`、`#cbec-software` = `C0CE20BENCS`、`#cbec-项目组` = `C0CE26TFLFL`（2026-11-05 实查）。上面示例里的频道→仓库对应只是写法示范，正式启用哪条映射以装配时确认为准。
 
 Token 不写配置：运行期从环境变量读——`DSH_SLACK_APP_TOKEN`（xapp-…）、`DSH_SLACK_BOT_TOKEN`（xoxb-…），变量名可用配置项 `appTokenEnv` / `botTokenEnv` 改。模型走宿主 dsh 的默认选择（建议 DeepSeek V4.1 Flash 1017 + dsh ≥ 0.2.1-rc.1，见 SPEC AC-11）。
 
@@ -34,7 +44,7 @@ Token 不写配置：运行期从环境变量读——`DSH_SLACK_APP_TOKEN`（xa
 
 ```sh
 npm install
-npm test   # node --test，26 条，覆盖 SPEC 的 AC-02~AC-10（单元+集成，Slack 与宿主均为假件）
+npm test   # node --test，33 条，覆盖 SPEC 的 AC-02~AC-10 与 AC-12/AC-13（单元+集成，Slack、宿主与 git 均为假件）
 ```
 
 真实环境 E2E（AC-01/02/04/05/08 的在线版）需在公司机 dsh + 真实频道各跑一次，证据回填 SPEC 的验收记录区。

@@ -124,6 +124,27 @@ export const TEST_CONFIG = {
   repoRoots: { demo: 'D:/repos/demo' },
 }
 
+export const TEST_MAPPED_CONFIG = {
+  allowedUserIds: ['U1'],
+  channelRepos: {
+    C1: { repo: 'demo', root: 'D:/repos/demo', remote: 'https://example.com/x/demo.git' },
+    C2: { repo: 'vault', root: 'D:/repos/vault', remote: 'https://example.com/x/vault.git' },
+  },
+}
+
+/** 假仓库同步：记录每次 ensure 的映射，默认报已存在；可传 impl 自定义行为。 */
+export class FakeRepoManager {
+  constructor(impl) {
+    this.calls = []
+    this.impl = impl ?? (async () => ({ action: 'exists' }))
+  }
+
+  async ensure(mapping) {
+    this.calls.push(mapping)
+    return this.impl(mapping)
+  }
+}
+
 export function dispatchEvent(overrides = {}) {
   return {
     kind: 'message',
