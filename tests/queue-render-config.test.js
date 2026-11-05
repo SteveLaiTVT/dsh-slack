@@ -44,8 +44,24 @@ test('buildDispatchPrompt：带频道上下文、定仓指引、交卷合同与�
   assert.match(p, /## 交卷/)
   assert.match(p, /未 push 到远程分支不算完成/)
   assert.match(p, /改文案/)
+  assert.doesNotMatch(p, /指定仓库：/)
+  assert.match(p, /先读上面的频道上下文/)
   const bare = buildDispatchPrompt({ issueUrl: undefined, body: 'x', workdir: 'D:/dsh-work' })
   assert.doesNotMatch(bare, /频道上下文（插件/)
+  assert.doesNotMatch(bare, /指定仓库：/)
+})
+
+test('buildDispatchPrompt：派单指定仓库时写明指定行，并优先于频道上下文', () => {
+  const p = buildDispatchPrompt(
+    { issueUrl: 'https://x/issues/1', body: '改文案', workdir: 'D:/dsh-work', repo: 'X' },
+    '【频道上下文】主题：仓库 Y',
+  )
+  assert.match(p, /指定仓库：X（派单指定，优先于频道上下文推断）/)
+  assert.match(p, /本单仓库以派单指定的「X」为准，优先于频道上下文里推断出的仓库/)
+  assert.match(p, /git clone 该指定仓库/)
+  assert.match(p, /主题：仓库 Y/)
+  assert.doesNotMatch(p, /git clone 上下文给出的仓库地址/)
+  assert.doesNotMatch(p, /先读上面的频道上下文/)
 })
 
 test('AC-10 redact：抹 token 模式与登记秘密，truncate 保留头尾', () => {
