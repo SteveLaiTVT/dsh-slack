@@ -3,7 +3,7 @@
 export class FakeTransport {
   constructor() {
     this.botUserId = 'UBOT'
-    this.posts = [] // { channel, text, threadTs, ts }
+    this.posts = [] // { channel, text, threadTs, blocks, ts }
     this.reactionsAdded = [] // { channel, timestamp, name }
     this.historyData = []
     this.reactionUsers = new Map() // `${ts}:${name}` -> [userIds]
@@ -49,9 +49,9 @@ export class FakeTransport {
 
   async disconnect() {}
 
-  async postMessage(channel, text, threadTs) {
+  async postMessage(channel, text, threadTs, blocks) {
     const ts = `p${++this.postSeq}`
-    this.posts.push({ channel, text, threadTs, ts })
+    this.posts.push({ channel, text, threadTs, blocks, ts })
     return ts
   }
 
