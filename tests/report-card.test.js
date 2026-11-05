@@ -319,9 +319,10 @@ test('AC-22 validateReport：多行、空值、歧义、commit/PR 反例', () =>
   assert.equal(kept.fields.branch, 'feat/button-copy')
   assert.equal(kept.fields.tests, 'npm test，12 通过 0 失败')
   assert.equal(kept.fields.pr, 'https://cnb.cool/x/demo/pulls/7')
-  // 围栏内的假字段头不另立字段，但正文是当前 AC 字段的续行。
+  // 围栏内的假字段头不另立字段；开闭围栏行与正文都是当前 AC 字段的续行。
   assert.equal(kept.fields.ac, [
     'AC-1 达成；AC-2 达成',
+    '```md',
     '## 交卷',
     '- 仓库：fenced-should-not-count',
     '- 分支：nope',
@@ -329,10 +330,12 @@ test('AC-22 validateReport：多行、空值、歧义、commit/PR 反例', () =>
     '- PR：无：围栏里的原因',
     '- 测试：不应被解析',
     '- AC 对照：不应被解析',
+    '```',
   ].join('\n'))
   assert.equal(kept.block.includes('fenced-should-not-count'), true)
   assert.equal(kept.block.includes('围栏里的原因'), true)
-  assert.equal(kept.block.includes('```'), false)
+  assert.ok(kept.block.split('\n').includes('```md'))
+  assert.ok(kept.block.split('\n').includes('```'))
 
   for (const heading of ['## 后续说明', '# 总览']) {
     const sectioned = [
@@ -368,7 +371,7 @@ test('AC-22 validateReport：多行、空值、歧义、commit/PR 反例', () =>
   assert.equal(lowerHeading.fields.ac, 'AC-1 达成\n### 失败细节\n按钮颜色不对')
 })
 
-test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全，fenced 日志保留 FAIL', () => {
+test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值不算缺失，开闭围栏行原样留在字段值，fenced 日志保留 FAIL', () => {
   const tildeFake = [
     '还没交卷，下面只是格式示例：',
     '~~~',
@@ -434,16 +437,24 @@ test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全�
     '~~~',
   ].join('\n')
   const insideReport = validateReport(onlyInside)
-  assert.equal(insideReport.ok, true)
-  assert.equal(insideReport.fields.repo, 'demo')
-  assert.equal(insideReport.fields.branch, 'feat/x')
-  assert.equal(insideReport.fields.commit, HASH)
-  assert.equal(insideReport.fields.pr, 'https://example.com/pr/1')
-  assert.equal(insideReport.prKind, 'url')
-  assert.equal(insideReport.fields.tests, 'npm test，1 通过')
-  assert.equal(insideReport.fields.ac, 'AC-1 达成')
-  assert.equal(insideReport.block.includes('```'), false)
-  assert.equal(insideReport.block.includes('~~~'), false)
+  assert.equal(insideReport.ambiguous, false)
+  assert.equal(insideReport.fields.repo, ['~~~', 'demo', '~~~'].join('\n'))
+  assert.equal(insideReport.fields.branch, ['```md', 'feat/x', '```'].join('\n'))
+  assert.equal(insideReport.fields.commit, ['~~~', HASH, '~~~'].join('\n'))
+  assert.equal(insideReport.fields.pr, ['```', 'https://example.com/pr/1', '````'].join('\n'))
+  assert.equal(insideReport.fields.tests, ['~~~', 'npm test，1 通过', '~~~'].join('\n'))
+  assert.equal(insideReport.fields.ac, ['~~~', 'AC-1 达成', '~~~'].join('\n'))
+  for (const key of ['repo', 'branch', 'commit', 'pr', 'tests', 'ac']) {
+    assert.equal(insideReport.missing.includes(key), false, key)
+  }
+  // 整值含开闭围栏行，不再是裸 hash / 裸 URL，格式校验按整值判失败；字段本身不算缺失。
+  assert.equal(insideReport.prKind, 'invalid')
+  assert.ok(insideReport.missing.includes('commit-format'))
+  assert.ok(insideReport.missing.includes('pr-format'))
+  assert.equal(insideReport.ok, false)
+  assert.ok(insideReport.block.split('\n').includes('```md'))
+  assert.ok(insideReport.block.split('\n').includes('~~~'))
+  assert.ok(insideReport.block.split('\n').includes('````'))
 
   const fencedLog = [
     '## 交卷',
@@ -452,7 +463,7 @@ test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全�
     `- Commit：${HASH}`,
     '- PR：https://example.com/pr/1',
     '- 测试：npm test',
-    '```',
+    '```sh',
     'node --test',
     '## 日志',
     'FAIL AC-2',
@@ -462,14 +473,19 @@ test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全�
   ].join('\n')
   const expectedTests = [
     'npm test',
+    '```sh',
     'node --test',
     '## 日志',
     'FAIL AC-2',
     '  AssertionError: expected button color',
+    '```',
   ].join('\n')
   const logReport = validateReport(fencedLog)
   assert.equal(logReport.ok, true)
   assert.equal(logReport.fields.tests, expectedTests)
+  const testLines = logReport.fields.tests.split('\n')
+  assert.equal(testLines[1], '```sh')
+  assert.equal(testLines.at(-1), '```')
   assert.equal(logReport.fields.ac, 'AC-1 达成')
   assert.equal(logReport.fields.repo, 'demo')
   const logCard = cardOf(fencedLog)
@@ -495,7 +511,7 @@ test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全�
   ].join('\n')
   const shortReport = validateReport(shortCloser)
   assert.equal(shortReport.ok, true)
-  assert.equal(shortReport.fields.tests, ['npm test', 'FAIL AC-2', '```', 'still-in-log'].join('\n'))
+  assert.equal(shortReport.fields.tests, ['npm test', '````', 'FAIL AC-2', '```', 'still-in-log', '````'].join('\n'))
   assert.equal(shortReport.fields.ac, 'AC-1 达成')
 
   const crossChar = [
@@ -514,7 +530,7 @@ test('围栏配对与续行：~~~ 假交卷不完整，围栏内取值算齐全�
   ].join('\n')
   const crossReport = validateReport(crossChar)
   assert.equal(crossReport.ok, true)
-  assert.equal(crossReport.fields.tests, ['npm test', 'FAIL AC-9', '```', 'after-fake-closer'].join('\n'))
+  assert.equal(crossReport.fields.tests, ['npm test', '~~~', 'FAIL AC-9', '```', 'after-fake-closer', '~~~'].join('\n'))
   assert.equal(crossReport.fields.ac, 'AC-1 达成')
 
   const afterClosed = [
@@ -924,16 +940,22 @@ test('AC-19(g) 真实 WebClient：连接断开与 429 都只请求一次且不�
 
   async function runCase(mode) {
     const requests = []
+    const bodies = []
     const server = http.createServer((req, res) => {
-      requests.push(req.url)
-      if (mode === 'reset' && req.url.endsWith('/chat.postMessage')) {
-        req.socket.on('error', () => {})
-        req.socket.destroy()
-        return
-      }
-      req.on('data', () => {})
+      const chunks = []
       req.on('error', () => {})
+      res.on('error', () => {})
+      req.on('data', chunk => chunks.push(chunk))
       req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8')
+        requests.push(req.url)
+        bodies.push(raw)
+        // 断连场景：请求体完整到达之后才拆连接，用来证明「收完 POST 再断开」。
+        if (mode === 'reset' && req.url.endsWith('/chat.postMessage')) {
+          req.socket.on('error', () => {})
+          req.socket.destroy()
+          return
+        }
         if (req.url.endsWith('/auth.test')) {
           res.writeHead(200, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ ok: true, user_id: 'UBOT' }))
@@ -986,13 +1008,28 @@ test('AC-19(g) 真实 WebClient：连接断开与 429 都只请求一次且不�
       ])
       clearTimeout(timeoutId)
       const elapsed = Date.now() - started
-      const chatHits = requests.slice(before).filter(url => url.includes('chat.postMessage'))
+      const scenarioUrls = requests.slice(before)
+      const scenarioBodies = bodies.slice(before)
+      const chatHits = scenarioUrls.filter(url => url.includes('chat.postMessage'))
       assert.equal(outcome.timedOut, undefined, `${mode} 等待了重发 elapsed=${elapsed} hits=${chatHits.length} urls=${requests.join(',')}`)
       assert.ok(outcome.error, mode)
       assert.equal(chatHits.length, 1, `${mode} urls=${requests.join(',')}`)
+      assert.equal(scenarioUrls.length, 1, `${mode} 场景总请求数 urls=${requests.join(',')}`)
       assert.ok(elapsed < 2000, `${mode} elapsed ${elapsed}`)
       if (mode === 'reset') {
         assert.equal(outcome.error.code, 'slack_webapi_request_error', outcome.error.message)
+        const raw = scenarioBodies[0]
+        let payload
+        try {
+          payload = raw.trim().startsWith('{')
+            ? JSON.parse(raw)
+            : Object.fromEntries(new URLSearchParams(raw))
+        } catch (error) {
+          assert.fail(`断连场景请求体不可解析：${error.message} raw=${JSON.stringify(raw)}`)
+        }
+        assert.equal(payload.channel, 'C1', raw)
+        assert.equal(payload.text, 'hello', raw)
+        assert.equal(payload.thread_ts, '100.001', raw)
       } else {
         assert.equal(outcome.error.code, 'slack_webapi_rate_limited_error', `${outcome.error.name} ${outcome.error.message}`)
         assert.equal(outcome.error.retryAfter, 30)
