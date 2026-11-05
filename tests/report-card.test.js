@@ -277,6 +277,81 @@ test('AC-22 validateReport：多行、空值、歧义、commit/PR 反例', () =>
   const none = validateReport('我干完了')
   assert.equal(none.ok, false)
   assert.deepEqual(none.missing, ['repo', 'branch', 'commit', 'pr', 'tests', 'ac'])
+
+  for (const fence of ['```', '```md']) {
+    const fencedOnly = [
+      '还没交卷，下面只是格式示例：',
+      fence,
+      '## 交卷',
+      '- 仓库：demo',
+      '- 分支：feat/x',
+      `- Commit：${HASH}`,
+      '- PR：https://example.com/pr/1',
+      '- 测试：npm test，12 通过 0 失败',
+      '- AC 对照：AC-1 达成',
+      '```',
+    ].join('\n')
+    const fenced = validateReport(fencedOnly)
+    assert.equal(fenced.ok, false, fence)
+    assert.equal(fenced.ambiguous, false, fence)
+    assert.equal(fenced.fields.repo, undefined, fence)
+    assert.equal(fenced.prKind, undefined, fence)
+    assert.deepEqual(fenced.missing, ['repo', 'branch', 'commit', 'pr', 'tests', 'ac'], fence)
+  }
+
+  const besideFence = [
+    reportText(),
+    '```md',
+    '## 交卷',
+    '- 仓库：fenced-should-not-count',
+    '- 分支：nope',
+    `- Commit：${'a'.repeat(40)}`,
+    '- PR：无：围栏里的原因',
+    '- 测试：不应被解析',
+    '- AC 对照：不应被解析',
+    '```',
+  ].join('\n')
+  const kept = validateReport(besideFence)
+  assert.equal(kept.ok, true)
+  assert.equal(kept.ambiguous, false)
+  assert.equal(kept.fields.repo, 'demo')
+  assert.equal(kept.fields.ac, 'AC-1 达成；AC-2 达成')
+  assert.equal(kept.fields.pr, 'https://cnb.cool/x/demo/pulls/7')
+  assert.equal(kept.block.includes('fenced-should-not-count'), false)
+  assert.equal(kept.block.includes('围栏里的原因'), false)
+
+  for (const heading of ['## 后续说明', '# 总览']) {
+    const sectioned = [
+      '## 交卷',
+      '- 仓库：demo',
+      '- 分支：feat/x',
+      `- Commit：${HASH}`,
+      '- 测试：npm test，1 通过',
+      '- AC 对照：AC-1 达成',
+      '- PR：无',
+      heading,
+      `MARKER-不应进PR-${heading}`,
+    ].join('\n')
+    const report = validateReport(sectioned)
+    assert.equal(report.ok, false, heading)
+    assert.equal(report.prKind, 'invalid', heading)
+    assert.ok(report.missing.includes('pr-format'), heading)
+    assert.equal(report.missing.includes('pr'), false, heading)
+    assert.equal(report.fields.pr, '无', heading)
+    assert.equal(report.fields.pr.includes('后续'), false, heading)
+    assert.equal(report.fields.pr.includes('MARKER'), false, heading)
+    assert.equal(report.block.includes(heading), false, heading)
+    assert.equal(report.block.includes('MARKER'), false, heading)
+    assert.equal(report.fields.repo, 'demo', heading)
+    assert.equal(report.fields.tests, 'npm test，1 通过', heading)
+    assert.equal(report.fields.ac, 'AC-1 达成', heading)
+  }
+
+  const lowerHeading = validateReport(reportText({
+    ac: 'AC-1 达成\n### 失败细节\n按钮颜色不对',
+  }))
+  assert.equal(lowerHeading.ok, true)
+  assert.equal(lowerHeading.fields.ac, 'AC-1 达成\n### 失败细节\n按钮颜色不对')
 })
 
 test('AC-23 buildReportCard：脱敏先于转义、链接不截断、超长显式截断、长度终检', () => {
@@ -619,6 +694,32 @@ test('AC-19(e) 构造失败：独立纯文本兜底，不依赖失败构造函�
       assertDelivery(result, item.label, `${kind} ${item.name}`)
     }
   }
+})
+
+test('AC-19(f) 真实 transport 构造 WebClient 时 retryConfig.retries 为 0，不发网络请求', async () => {
+  const constructed = []
+  class CapturingWebClient {
+    constructor(token, options) {
+      constructed.push({ token, options })
+      this.auth = { test: async () => ({ user_id: 'UBOT' }) }
+    }
+  }
+  class CapturingSocket {
+    constructor(options) {
+      this.options = options
+    }
+    on() {}
+    async start() {}
+  }
+  const transport = new SlackTransport({
+    ...TOKENS,
+    sdkConstructors: { WebClient: CapturingWebClient, SocketModeClient: CapturingSocket },
+  })
+  await transport.connect()
+  assert.equal(constructed.length, 1)
+  assert.equal(constructed[0].token, TOKENS.botToken)
+  assert.deepEqual(constructed[0].options, { retryConfig: { retries: 0 } })
+  assert.equal(transport.botUserId, 'UBOT')
 })
 
 test('AC-20 开工/排队/取消/启动失败仍是纯文本，文案不变', async () => {
